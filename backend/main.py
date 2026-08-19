@@ -8,7 +8,108 @@ from google import genai
 from google.genai import types
 import traceback
 import json
-import os
+
+import time
+import logging
+import uuid
+import hashlib
+from pydantic import BaseModel, ValidationError
+
+# Setup structured logging
+logger = logging.getLogger("ai_logger")
+logger.setLevel(logging.INFO)
+handler = logging.StreamHandler()
+handler.setFormatter(logging.Formatter('%(message)s'))
+logger.addHandler(handler)
+
+def log_ai_call(endpoint: str, user_id: str, latency: float, success: bool, error: str = "", tokens: int = 0):
+    log_data = {
+        "event": "ai_request",
+        "request_id": str(uuid.uuid4()),
+        "user_id_hash": hashlib.sha256(user_id.encode()).hexdigest() if user_id else "anonymous",
+        "endpoint": endpoint,
+        "latency_ms": round(latency * 1000, 2),
+        "success": success,
+        "error": error,
+        "tokens": tokens
+    }
+    logger.info(json.dumps(log_data))
+
+def call_gemini_structured(prompt: str, schema_model, default_fallback: dict, endpoint_name: str, user_id: str = ""):
+    client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
+    schema_schema = schema_model.schema_json()
+    
+    config = types.GenerateContentConfig(
+        response_mime_type='application/json',
+        system_instruction=f'You are a precise JSON-generating assistant. Output exactly matching this schema: {schema_schema}'
+    )
+    
+    start_time = time.time()
+    try:
+        resp = client.models.generate_content(
+            model='gemini-3.5-flash',
+            contents=prompt,
+            config=config
+        )
+        latency = time.time() - start_time
+        tokens = resp.usage_metadata.total_token_count if hasattr(resp, "usage_metadata") else 0
+        
+        text = resp.text
+        if text.startswith("```json"): text = text.replace("```json", "").replace("```", "").strip()
+        elif text.startswith("```"): text = text.replace("```", "").strip()
+        
+        # Validation
+        try:
+            validated = schema_model.parse_raw(text)
+            log_ai_call(endpoint_name, user_id, latency, True, tokens=tokens)
+            return validated.dict()
+        except ValidationError as ve:
+            # Retry once
+            retry_prompt = f"Your previous output was invalid. STRICTLY output valid JSON matching this schema:\n{schema_schema}\n\nOriginal Request:\n{prompt}"
+            retry_start = time.time()
+            resp2 = client.models.generate_content(
+                model='gemini-3.5-flash',
+                contents=retry_prompt,
+                config=config
+            )
+            retry_latency = time.time() - retry_start
+            retry_tokens = resp2.usage_metadata.total_token_count if hasattr(resp2, "usage_metadata") else 0
+            
+            text2 = resp2.text
+            if text2.startswith("```json"): text2 = text2.replace("```json", "").replace("```", "").strip()
+            elif text2.startswith("```"): text2 = text2.replace("```", "").strip()
+            
+            validated2 = schema_model.parse_raw(text2)
+            log_ai_call(endpoint_name, user_id, latency + retry_latency, True, tokens=tokens + retry_tokens)
+            return validated2.dict()
+            
+    except Exception as e:
+        latency = time.time() - start_time
+        log_ai_call(endpoint_name, user_id, latency, False, error=str(e))
+        return default_fallback
+
+
+class OnboardingTask(BaseModel):
+    title: str
+    description: str
+    estimated_hours: float
+    priority: str
+
+class OnboardingResponse(BaseModel):
+    tasks: List[OnboardingTask]
+
+class RiskResponse(BaseModel):
+    risk_score: int
+    recommendation: str
+    breakdown: List[str]
+
+import sentry_sdk
+
+sentry_sdk.init(
+    dsn=os.environ.get("SENTRY_DSN", ""),
+    traces_sample_rate=1.0,
+    profiles_sample_rate=1.0,
+)
 
 app = FastAPI(title="Deadline Guardian AI API")
 
@@ -285,36 +386,20 @@ class OnboardingRequest(BaseModel):
     user_mission: str
 
 @app.post("/api/onboarding_generate")
-def onboarding_generate(req: OnboardingRequest):
-    now_iso = datetime.now().isoformat()
+def onboarding_generate(req: OnboardingRequest, user_id: str = Header(default="anonymous")):
     prompt = f"""
-    Current Date and Time: {now_iso}
-    
-    You are an AI onboarding assistant for Trackly. A new user just joined and stated their primary mission: "{req.user_mission}".
-    Generate a "Starter Pack" of exactly 3 realistic, specific tasks to help them get started right now.
-    
-    You MUST output ONLY a raw JSON array of objects. Do NOT use markdown code blocks like ```json.
-    Format exactly like this:
-    [
-      {{
-        "title": "Task 1",
-        "estimated_hours": 1.5,
-        "due_date": "2026-06-30T20:00:00",
-        "priority": "high",
-        "blocked_sites": ["youtube.com", "instagram.com"]
-      }}
-    ]
+    The user wants to achieve this goal: {req.mission_statement}
+    Break this down into 3-5 immediate, actionable tasks.
+    Return JSON.
     """
-    try:
-        client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
-        resp = client.models.generate_content(model='gemini-3.5-flash', contents=prompt)
-        return {"tasks_json": resp.text}
-    except Exception as e:
-        return {"error": str(e)}
+    fallback = {"tasks": []}
+    resp = call_gemini_structured(prompt, OnboardingResponse, fallback, "onboarding_generate", user_id)
+    return {"tasks_json": json.dumps(resp["tasks"])}
+
+
 
 @app.post("/api/analyze_risk")
-def analyze_risk(task: Task):
-    # Prepare the prompt for Gemini
+def analyze_risk(task: Task, user_id: str = Header(default="anonymous")):
     prompt = f"""
     You are an AI Productivity Coach. Analyze the following task and predict the risk of missing the deadline.
     
@@ -326,30 +411,16 @@ def analyze_risk(task: Task):
     Calculate a 'risk_score' (0-100) indicating the probability of failing to complete the task on time.
     Provide a 'recommendation' on what the user should do immediately.
     Break the task down into a 'breakdown' array of 3-5 smaller actionable steps.
-    
-    Respond STRICTLY in JSON format with exactly these keys: "risk_score" (integer), "recommendation" (string), "breakdown" (list of strings).
     """
     
-    try:
-        client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
-        resp = client.models.generate_content(
-            model='gemini-3.5-flash',
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type='application/json',
-                system_instruction='You are a precise JSON-generating assistant. Only output valid JSON.'
-            )
-        )
-        text = resp.text
-        if text.startswith("```json"): text = text.replace("```json", "").replace("```", "").strip()
-        return json.loads(text)
-    except Exception as e:
-        print(f"Gemini Error: {e}")
-        return {
-            "risk_score": 50,
-            "recommendation": f"Gemini API Error: {str(e)}",
-            "breakdown": ["Check API Key", "Check internet connection", "Retry task"]
-        }
+    fallback = {
+        "risk_score": 50,
+        "recommendation": "Unable to calculate risk. Please start working immediately.",
+        "breakdown": ["Open your tools", "Begin step one", "Maintain focus"]
+    }
+    
+    return call_gemini_structured(prompt, RiskResponse, fallback, "analyze_risk", user_id)
+
 
 class ChatMessage(BaseModel):
     role: str
@@ -510,27 +581,31 @@ def upload_schedule(payload: UploadSchedulePayload, user_id: str = Depends(get_u
     
     try:
         schedule_text = ""
+        import base64
+        import io
         if is_pdf:
-            import base64
-            import io
             from pypdf import PdfReader
             pdf_bytes = base64.b64decode(b64_data)
             reader = PdfReader(io.BytesIO(pdf_bytes))
             for page in reader.pages:
                 text = page.extract_text()
-                if text: schedule_text += text + "\n"
+                if text: schedule_text += text + "\\n"
         else:
             # Step 1: Gemini OCR
-            vision_response = ai.generate(
+            client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
+            img_bytes = base64.b64decode(b64_data)
+            vision_resp = client.models.generate_content(
                 model='gemini-3.5-flash',
-                prompt="Read this entire schedule/timetable and extract all the text, events, and dates exactly as they appear.",
-                images=[b64_data]
+                contents=[
+                    types.Part.from_bytes(data=img_bytes, mime_type='image/jpeg'),
+                    types.Part.from_text(text="Read this entire schedule/timetable and extract all the text, events, and dates exactly as they appear.")
+                ]
             )
-            schedule_text = vision_response['response'].strip()
+            schedule_text = vision_resp.text.strip()
         
         # Step 2: Gemini logic
         current_time = datetime.now().isoformat()
-        judge_prompt = f"""
+        prompt = f"""
         You are a strict, highly intelligent AI Task Planner. The user uploaded a schedule.
         Here is the text extracted from the schedule: 
         {schedule_text}
@@ -538,41 +613,23 @@ def upload_schedule(payload: UploadSchedulePayload, user_id: str = Depends(get_u
         The current date and time is: {current_time}.
         
         Your job is to reverse-engineer this schedule and generate a list of preparation tasks leading up to the events. 
-        For example, if there is a Biology Exam on July 24th, create a task to "Study for Biology Exam" due on July 23rd.
-        If there is a Meeting tomorrow, create a task to "Prepare Meeting Agenda" due 2 hours before the meeting.
-        
-        Rules:
-        - Identify 1 to 5 most important events from the schedule.
-        - For each event, create exactly 1 preparation task.
-        - The `due_date` MUST be in strict ISO format and MUST be before the event's actual time.
-        - `priority` must be "critical", "high", "medium", or "low".
-        - `estimated_hours` should be a reasonable float (e.g. 2.0).
-        - `blocked_sites` should be ["youtube.com", "instagram.com"].
-        
-        You MUST output ONLY a valid JSON array of task objects, and NOTHING else. No markdown backticks, no explanations. Just raw JSON array like this:
-        [
-          {{
-            "title": "Study for Biology Exam",
-            "estimated_hours": 3.0,
-            "priority": "critical",
-            "due_date": "2026-07-23T18:00:00",
-            "blocked_sites": ["youtube.com", "instagram.com"]
-          }}
-        ]
         """
         
-        judge_resp = client.models.generate_content(model='gemini-3.5-flash', contents=judge_prompt)
-        resp_text = judge_resp.text.strip()
-        
-        if "```json" in resp_text:
-            resp_text = resp_text.split("```json")[1].split("```")[0].strip()
-        elif "```" in resp_text:
-            resp_text = resp_text.replace("```", "").strip()
+        class PrepTask(BaseModel):
+            title: str
+            estimated_hours: float
+            priority: str
+            due_date: str
+            blocked_sites: List[str]
             
-        tasks_data = json.loads(resp_text)
+        class ScheduleResponse(BaseModel):
+            tasks: List[PrepTask]
+        
+        fallback = {"tasks": []}
+        resp = call_gemini_structured(prompt, ScheduleResponse, fallback, "upload_schedule", user_id)
         
         created_tasks = []
-        for td in tasks_data:
+        for td in resp["tasks"]:
             task_id = str(uuid.uuid4())[:8]
             new_task = {
                 "id": task_id,
@@ -594,6 +651,7 @@ def upload_schedule(payload: UploadSchedulePayload, user_id: str = Depends(get_u
     except Exception as e:
         print(f"Schedule Parse Error: {e}")
         return {"error": str(e)}
+
 
 if __name__ == "__main__":
     import uvicorn
