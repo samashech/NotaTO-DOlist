@@ -1,0 +1,11 @@
+{
+  "targetUrl": "http://localhost:5174/",
+  "geminiApiKey": "AQ.Ab8RN6JhLtLzRN5TK5zC6Nz1WdEnjNiPYn9_tQPStGhM6OXKEg",
+  "ignoredPaths": [
+    "node_modules",
+    "dist",
+    "build",
+    "coverage"
+  ],
+  "databaseUrl": "file:/home/samash/.autoqa/dev.db"
+}

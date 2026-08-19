@@ -32,17 +32,16 @@ In React, **State** is the memory of a component. If a variable changes, React a
 
 ## 3. The Backend (The Kitchen)
 ### **FastAPI (Python)**
-This is the server framework we used. We chose Python because AI tools (like Ollama and PyTorch) are natively written for Python. FastAPI is exceptionally fast because it handles requests asynchronously (it doesn't freeze the whole server while waiting for the AI to finish thinking).
+This is the server framework we used. We chose Python because AI tools (like the Gemini SDK) are natively written for Python. FastAPI is exceptionally fast because it handles requests asynchronously (it doesn't freeze the whole server while waiting for the AI to finish thinking).
 
 ---
 
 ## 4. Artificial Intelligence
-### **Cloud AI vs. Local AI**
-- **Cloud AI (OpenAI API, Gemini API):** Your code sends the user's prompt over the internet to Google's or OpenAI's massive supercomputers. They process it and send the text back. *Pros:* Extremely smart. *Cons:* Costs money, requires internet, privacy concerns.
-- **Local AI (Ollama):** You download the "brain" (the model file, e.g., `Llama 3`) directly to your hard drive. 
+### **Cloud AI (Gemini 2.5 Flash)**
+We integrated the **Gemini 2.5 Flash API** directly into our Python backend. 
 
-### **How Ollama Works**
-When you run Ollama, it starts a hidden REST API server on your computer at `http://localhost:11434`. When our FastAPI Python code asks the AI a question, it is literally making a network request to your own computer. This allows your app to operate 100% offline and securely.
+### **How it Works**
+Our FastAPI Python code sends the user's prompt securely over the internet to Google's highly-optimized Gemini infrastructure, allowing incredibly fast responses for parsing tasks and scheduling.
 
 ---
 

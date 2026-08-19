@@ -11,15 +11,15 @@ BACKEND_PID=$!
 cd ..
 
 # 2. Start the React Frontend
-echo "-> Starting Vite Frontend (Port 5173)..."
+echo "-> Starting Vite Frontend (Port 5174)..."
 cd frontend
-npm run dev -- --host 0.0.0.0 --port 5173 &
+npm run dev -- --host 0.0.0.0 --port 5174 &
 FRONTEND_PID=$!
 cd ..
 
 echo ""
 echo "✅ All servers are running!"
-echo "🌐 You can access the app at: http://localhost:5173"
+echo "🌐 You can access the app at: http://localhost:5174"
 echo "🛑 Press Ctrl+C at any time to gracefully shut down both servers."
 echo ""
 

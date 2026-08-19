@@ -16,7 +16,7 @@ def chat(model, messages, **kwargs):
         else:
             prompt += f"{msg['role'].upper()}: {msg['content']}\n\n"
             
-    m = genai.GenerativeModel("gemini-2.5-flash", system_instruction=system_instruction if system_instruction else None)
+    m = genai.GenerativeModel(model, system_instruction=system_instruction if system_instruction else None)
     resp = m.generate_content(prompt)
     
     text = resp.text
@@ -35,7 +35,7 @@ def generate(model, prompt, images=None, **kwargs):
                 "data": img
             })
     
-    m = genai.GenerativeModel("gemini-2.5-flash")
+    m = genai.GenerativeModel(model)
     resp = m.generate_content(contents)
     text = resp.text
     if text.startswith("```json"):

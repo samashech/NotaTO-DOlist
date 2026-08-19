@@ -7,8 +7,8 @@ This document serves as a historical record of all the architecture decisions, f
 - **Backend:** FastAPI (Python) serving RESTful endpoints and acting as a bridge to the local LLM.
 - **Database:** Currently using an in-memory array (`MOCK_TASKS`), prepped for easy migration to a real database (like PostgreSQL or Firebase Firestore) later.
 
-## 🤖 AI Integrations (Ollama)
-We completely bypassed cloud APIs (like OpenAI or Gemini) in favor of **100% local, private AI inference** using Ollama and the `fluffy/l3-8b-stheno-v3.2:q4_k_m` model.
+## 🤖 AI Integrations (Gemini 2.5 Flash)
+We completely upgraded to cloud APIs in favor of **powerful AI inference** using Gemini 2.5 Flash.
 1. **Risk Analysis Engine (`/api/analyze_risk`):** An asynchronous endpoint that reads a newly created task and predicts the percentage risk of failure, returning a JSON breakdown of recommendations.
 2. **Execution Coach (`/api/chat`):** A conversational agent that has full hidden context of your active dashboard. It can advise you on what to prioritize.
 3. **AI Task Planner (`/api/planner_chat`):** A structured data-gathering agent. Instead of filling out a form, you talk to the AI. It asks follow-up questions, extracts the parameters, and outputs a strict JSON payload to automatically spawn the task.

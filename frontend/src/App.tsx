@@ -1147,7 +1147,7 @@ function App() {
               <div style={{ textAlign: 'center', padding: '64px', background: 'var(--bg-secondary)', borderRadius: '16px', border: '1px dashed var(--border-color)', animation: 'fadeIn 0.5s' }}>
                 <div style={{ width: '64px', height: '64px', background: 'var(--bg-primary)', borderRadius: '50%', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 16px', fontSize: '24px' }}>🎯</div>
                 <h3 style={{ marginBottom: '8px' }}>Your dashboard is completely clear</h3>
-                <p style={{ color: 'var(--text-secondary)', marginBottom: '24px' }}>Add a new task to let your local Ollama AI coach analyze your schedule and predict failure risks.</p>
+                <p style={{ color: 'var(--text-secondary)', marginBottom: '24px' }}>Add a new task to let your local Gemini AI coach analyze your schedule and predict failure risks.</p>
                 <button className="btn-primary hover-lift" onClick={() => setShowModal(true)}>+ Create First Task</button>
               </div>
             )}

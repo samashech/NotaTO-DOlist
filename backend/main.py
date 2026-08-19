@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
-import gemini_shim as ollama
+import gemini_shim as ai
 import json
 import os
 
@@ -38,19 +38,29 @@ class Habit(BaseModel):
     requires_proof: bool = False
 
 
-DB_FILE = "actionmate_db.json"
-def load_db():
-    try:
-        with open(DB_FILE, "r") as f:
-            return json.load(f)
-    except Exception:
-        return {"tasks": {}, "habits": {}, "usage": {}}
+import firebase_admin
+from firebase_admin import credentials, firestore
+import uuid
 
-def save_db(db):
-    with open(DB_FILE, "w") as f:
-        json.dump(db, f)
+# Initialize Firebase Admin
+if not firebase_admin._apps:
+    cred_json = os.environ.get("FIREBASE_SERVICE_ACCOUNT")
+    if cred_json:
+        cred_dict = json.loads(cred_json)
+        cred = credentials.Certificate(cred_dict)
+        firebase_admin.initialize_app(cred)
+    else:
+        try:
+            firebase_admin.initialize_app()
+        except Exception as e:
+            print(f"Warning: Firebase init failed. {e}")
 
-DB = load_db()
+try:
+    db = firestore.client()
+except Exception as e:
+    db = None
+    print(f"Warning: Firestore client failed to initialize. {e}")
+
 ACTIVE_USER_ID = "default"
 
 def get_user_id(x_user_id: Optional[str] = Header(None)):
@@ -66,16 +76,23 @@ def read_root():
 
 @app.get("/api/tasks")
 def get_tasks(user_id: str = Depends(get_user_id)):
+    if not db: return []
     now = datetime.now()
+    tasks_ref = db.collection('users').document(user_id).collection('tasks')
+    docs = tasks_ref.get()
+    
     valid_tasks = []
-    for t in DB['tasks'].get(user_id, []):
+    for doc in docs:
+        t = doc.to_dict()
         if t.get("status") == "completed" and t.get("completed_at"):
-            completed_date = datetime.fromisoformat(t["completed_at"])
-            if (now - completed_date).days > 7:
-                continue # Auto-cleanup
+            try:
+                completed_date = datetime.fromisoformat(t["completed_at"])
+                if (now - completed_date).days > 7:
+                    tasks_ref.document(doc.id).delete()
+                    continue
+            except:
+                pass
         valid_tasks.append(t)
-    DB['tasks'][user_id] = valid_tasks
-    save_db(DB)
     return valid_tasks
 
 @app.post("/api/tasks", response_model=Task)
@@ -92,38 +109,38 @@ def create_task(task: Task, user_id: str = Depends(get_user_id)):
         "created_at": task.created_at or datetime.now().isoformat(),
         "completed_at": None
     }
-    if user_id not in DB['tasks']: DB['tasks'][user_id] = []
-    DB['tasks'][user_id].append(new_task)
-    save_db(DB)
+    if db:
+        db.collection('users').document(user_id).collection('tasks').document(task.id).set(new_task)
     return new_task
 
 @app.put("/api/tasks/{task_id}")
 def update_task_status(task_id: str, payload: dict, user_id: str = Depends(get_user_id)):
-    for t in DB['tasks'].get(user_id, []):
-        if t["id"] == task_id:
-            old_status = t.get("status")
-            if "status" in payload:
-                t["status"] = payload["status"]
-            
-            # Record completed_at time when marked as completed
-            if payload.get("status") == "completed" and old_status != "completed":
-                t["completed_at"] = datetime.now().isoformat()
-                
-            if "due_date" in payload: t["due_date"] = payload["due_date"]
-            if "estimated_hours" in payload: t["estimated_hours"] = payload["estimated_hours"]
-            if "title" in payload: t["title"] = payload["title"]
-            if "priority" in payload: t["priority"] = payload["priority"]
-            if "blocked_sites" in payload: t["blocked_sites"] = payload["blocked_sites"]
-            
-            save_db(DB)
-            return t
-    return {"error": "not found"}
+    if not db: return {"error": "db not initialized"}
+    doc_ref = db.collection('users').document(user_id).collection('tasks').document(task_id)
+    doc = doc_ref.get()
+    if not doc.exists: return {"error": "not found"}
+    
+    t = doc.to_dict()
+    old_status = t.get("status")
+    
+    updates = {}
+    if "status" in payload: updates["status"] = payload["status"]
+    if payload.get("status") == "completed" and old_status != "completed":
+        updates["completed_at"] = datetime.now().isoformat()
+    if "due_date" in payload: updates["due_date"] = payload["due_date"]
+    if "estimated_hours" in payload: updates["estimated_hours"] = payload["estimated_hours"]
+    if "title" in payload: updates["title"] = payload["title"]
+    if "priority" in payload: updates["priority"] = payload["priority"]
+    if "blocked_sites" in payload: updates["blocked_sites"] = payload["blocked_sites"]
+    
+    doc_ref.update(updates)
+    t.update(updates)
+    return t
 
 @app.delete("/api/tasks/{task_id}")
 def delete_task(task_id: str, user_id: str = Depends(get_user_id)):
-    if user_id in DB['tasks']:
-        DB['tasks'][user_id] = [t for t in DB['tasks'][user_id] if t["id"] != task_id]
-        save_db(DB)
+    if db:
+        db.collection('users').document(user_id).collection('tasks').document(task_id).delete()
     return {"status": "ok"}
 
 
@@ -134,55 +151,73 @@ class UsagePayload(BaseModel):
 
 @app.post("/api/usage")
 def report_usage(payload: UsagePayload, user_id: str = Depends(get_user_id)):
-    if user_id not in DB['usage']: DB['usage'][user_id] = {}
-    DB['usage'][user_id][payload.domain] = DB['usage'][user_id].get(payload.domain, 0) + payload.seconds
-    save_db(DB)
+    if not db: return {"status": "ok"}
+    doc_ref = db.collection('users').document(user_id).collection('usage').document(payload.domain.replace('/', '_'))
+    doc = doc_ref.get()
+    if doc.exists:
+        doc_ref.update({"seconds": firestore.Increment(payload.seconds)})
+    else:
+        doc_ref.set({"domain": payload.domain, "seconds": payload.seconds})
     return {"status": "ok"}
 
 @app.get("/api/usage")
 def get_usage(user_id: str = Depends(get_user_id)):
-    return DB['usage'].get(user_id, {})
+    if not db: return {}
+    docs = db.collection('users').document(user_id).collection('usage').get()
+    usage = {}
+    for doc in docs:
+        data = doc.to_dict()
+        usage[data.get('domain', doc.id)] = data.get('seconds', 0)
+    return usage
 
 @app.get("/api/habits")
 def get_habits(user_id: str = Depends(get_user_id)):
-    return DB['habits'].get(user_id, [])
+    if not db: return []
+    docs = db.collection('users').document(user_id).collection('habits').get()
+    return [doc.to_dict() for doc in docs]
 
 @app.post("/api/habits")
 def create_habit(habit: Habit, user_id: str = Depends(get_user_id)):
     new_h = habit.dict()
-    if user_id not in DB['habits']: DB['habits'][user_id] = []
-    DB['habits'][user_id].append(new_h)
-    save_db(DB)
+    if db:
+        db.collection('users').document(user_id).collection('habits').document(habit.id).set(new_h)
     return new_h
 
 @app.put("/api/habits/{habit_id}/toggle")
 def toggle_habit(habit_id: str, user_id: str = Depends(get_user_id)):
-    for h in DB['habits'].get(user_id, []):
-        if h["id"] == habit_id:
-            h["completed_today"] = not h["completed_today"]
-            if h["completed_today"]:
-                h["streak"] += 1
-            else:
-                h["streak"] = max(0, h["streak"] - 1)
-            save_db(DB)
-            return h
-    return {"error": "not found"}
+    if not db: return {"error": "db not initialized"}
+    doc_ref = db.collection('users').document(user_id).collection('habits').document(habit_id)
+    doc = doc_ref.get()
+    if not doc.exists: return {"error": "not found"}
+    
+    h = doc.to_dict()
+    h["completed_today"] = not h.get("completed_today", False)
+    if h["completed_today"]:
+        h["streak"] = h.get("streak", 0) + 1
+    else:
+        h["streak"] = max(0, h.get("streak", 0) - 1)
+        
+    doc_ref.update({"completed_today": h["completed_today"], "streak": h["streak"]})
+    return h
 
 @app.put("/api/habits/{habit_id}")
 def update_habit(habit_id: str, payload: dict, user_id: str = Depends(get_user_id)):
-    for h in DB['habits'].get(user_id, []):
-        if h["id"] == habit_id:
-            if "title" in payload:
-                h["title"] = payload["title"]
-            save_db(DB)
-            return h
-    return {"error": "not found"}
+    if not db: return {"error": "db not initialized"}
+    doc_ref = db.collection('users').document(user_id).collection('habits').document(habit_id)
+    doc = doc_ref.get()
+    if not doc.exists: return {"error": "not found"}
+    
+    if "title" in payload:
+        doc_ref.update({"title": payload["title"]})
+        h = doc.to_dict()
+        h["title"] = payload["title"]
+        return h
+    return doc.to_dict()
 
 @app.delete("/api/habits/{habit_id}")
 def delete_habit(habit_id: str, user_id: str = Depends(get_user_id)):
-    if user_id in DB['habits']:
-        DB['habits'][user_id] = [h for h in DB['habits'][user_id] if h["id"] != habit_id]
-    save_db(DB)
+    if db:
+        db.collection('users').document(user_id).collection('habits').document(habit_id).delete()
     return {"status": "deleted"}
 
 class VerifyPayload(BaseModel):
@@ -190,7 +225,13 @@ class VerifyPayload(BaseModel):
 
 @app.post("/api/habits/{habit_id}/verify")
 def verify_habit(habit_id: str, payload: VerifyPayload, user_id: str = Depends(get_user_id)):
-    target_habit = next((h for h in DB['habits'].get(user_id, []) if h["id"] == habit_id), None)
+    target_habit = None
+    doc_ref = None
+    if db:
+        doc_ref = db.collection('users').document(user_id).collection('habits').document(habit_id)
+        doc = doc_ref.get()
+        if doc.exists: target_habit = doc.to_dict()
+    
     if not target_habit:
         return {"error": "not found"}
 
@@ -199,12 +240,12 @@ def verify_habit(habit_id: str, payload: VerifyPayload, user_id: str = Depends(g
         b64_data = b64_data.split("base64,")[1]
 
     try:
-        # Step 1: The "Eyes" (Moondream describes the image)
-        vision_response = ollama.generate(model='moondream', prompt="Describe exactly what is happening in this image in detail.", images=[b64_data]
+        # Step 1: The "Eyes" (Gemini describes the image)
+        vision_response = ai.generate(model='gemini-2.5-flash', prompt="Describe exactly what is happening in this image in detail.", images=[b64_data]
         )
         image_description = vision_response['response'].strip()
         
-        # Step 2: The "Judge" (Stheno evaluates the description)
+        # Step 2: The "Judge" (Gemini evaluates the description)
         judge_prompt = f"""
         You are a strict AI judge. The user is trying to prove they completed the habit: "{target_habit['title']}".
         Here is what the camera sees: {image_description}
@@ -212,8 +253,8 @@ def verify_habit(habit_id: str, payload: VerifyPayload, user_id: str = Depends(g
         Did the user complete the habit based on this description? 
         Answer strictly with the word YES or NO, followed by a one-sentence sassy explanation.
         """
-        judge_response = ollama.chat(
-            model="fluffy/l3-8b-stheno-v3.2:q4_k_m",
+        judge_response = ai.chat(
+            model="gemini-2.5-flash",
             messages=[{"role": "user", "content": judge_prompt}]
         )
         resp_text = judge_response['message']['content'].strip()
@@ -225,8 +266,9 @@ def verify_habit(habit_id: str, payload: VerifyPayload, user_id: str = Depends(g
             
         if result.get("verified"):
             target_habit["completed_today"] = True
-            target_habit["streak"] += 1
-            save_db(DB)
+            target_habit["streak"] = target_habit.get("streak", 0) + 1
+            if db and doc_ref:
+                doc_ref.update({"completed_today": True, "streak": target_habit["streak"]})
         return result
     except Exception as e:
         return {"verified": False, "sassy_reason": f"AI Verification failed: {str(e)}"}
@@ -256,8 +298,8 @@ def onboarding_generate(req: OnboardingRequest):
     ]
     """
     try:
-        response = ollama.chat(
-            model="fluffy/l3-8b-stheno-v3.2:q4_k_m",
+        response = ai.chat(
+            model="gemini-2.5-flash",
             messages=[{"role": "user", "content": prompt}]
         )
         return {"tasks_json": response['message']['content']}
@@ -266,7 +308,7 @@ def onboarding_generate(req: OnboardingRequest):
 
 @app.post("/api/analyze_risk")
 def analyze_risk(task: Task):
-    # Prepare the prompt for Ollama
+    # Prepare the prompt for Gemini
     prompt = f"""
     You are an AI Productivity Coach. Analyze the following task and predict the risk of missing the deadline.
     
@@ -283,7 +325,7 @@ def analyze_risk(task: Task):
     """
     
     try:
-        response = ollama.chat(model='fluffy/l3-8b-stheno-v3.2:q4_k_m', messages=[
+        response = ai.chat(model='gemini-2.5-flash', messages=[
             {
                 'role': 'system',
                 'content': 'You are a precise JSON-generating assistant. Only output valid JSON.'
@@ -297,12 +339,12 @@ def analyze_risk(task: Task):
         result_content = response['message']['content']
         return json.loads(result_content)
     except Exception as e:
-        # Fallback if Ollama isn't running or fails
-        print(f"Ollama Error: {e}")
+        # Fallback if Gemini isn't running or fails
+        print(f"Gemini Error: {e}")
         return {
             "risk_score": 50,
             "recommendation": "Unable to connect to Google Gemini API. Please check your API key in Settings.",
-            "breakdown": ["Check Ollama connection", "Pull the required model", "Retry task"]
+            "breakdown": ["Check API Key", "Check internet connection", "Retry task"]
         }
 
 class ChatMessage(BaseModel):
@@ -326,15 +368,15 @@ def chat_with_ai(req: ChatRequest):
     """
     
     # Prepend system prompt to the messages
-    ollama_messages = [{'role': 'system', 'content': system_prompt}]
+    gemini_messages = [{'role': 'system', 'content': system_prompt}]
     for msg in req.messages:
-        ollama_messages.append({'role': msg.role, 'content': msg.content})
+        gemini_messages.append({'role': msg.role, 'content': msg.content})
         
     try:
-        response = ollama.chat(model='fluffy/l3-8b-stheno-v3.2:q4_k_m', messages=ollama_messages)
+        response = ai.chat(model='gemini-2.5-flash', messages=gemini_messages)
         return {"reply": response['message']['content']}
     except Exception as e:
-        print(f"Ollama Chat Error: {e}")
+        print(f"Gemini Chat Error: {e}")
         return {"reply": "I'm having trouble connecting to Gemini. Please check your API key in Settings."}
 
 class PlannerChatRequest(BaseModel):
@@ -380,15 +422,15 @@ def planner_chat(req: PlannerChatRequest):
     Do not add ANY conversational text before or after the JSON block. Output ONLY the JSON block.
     """
     
-    ollama_messages = [{'role': 'system', 'content': system_prompt}]
+    gemini_messages = [{'role': 'system', 'content': system_prompt}]
     for msg in req.messages:
-        ollama_messages.append({'role': msg.role, 'content': msg.content})
+        gemini_messages.append({'role': msg.role, 'content': msg.content})
         
     try:
-        response = ollama.chat(model='fluffy/l3-8b-stheno-v3.2:q4_k_m', messages=ollama_messages)
+        response = ai.chat(model='gemini-2.5-flash', messages=gemini_messages)
         return {"reply": response['message']['content']}
     except Exception as e:
-        print(f"Ollama Chat Error: {e}")
+        print(f"Gemini Chat Error: {e}")
         return {"reply": "I'm having trouble connecting to Gemini. Please check your API key in Settings."}
 
 @app.post("/api/interrogation_chat")
@@ -420,15 +462,15 @@ def interrogation_chat(req: PlannerChatRequest):
     Do not add ANY conversational text before or after the JSON block. Output ONLY the JSON block.
     """
     
-    ollama_messages = [{'role': 'system', 'content': system_prompt}]
+    gemini_messages = [{'role': 'system', 'content': system_prompt}]
     for msg in req.messages:
-        ollama_messages.append({'role': msg.role, 'content': msg.content})
+        gemini_messages.append({'role': msg.role, 'content': msg.content})
         
     try:
-        response = ollama.chat(model='fluffy/l3-8b-stheno-v3.2:q4_k_m', messages=ollama_messages)
+        response = ai.chat(model='gemini-2.5-flash', messages=gemini_messages)
         return {"reply": response['message']['content']}
     except Exception as e:
-        print(f"Ollama Chat Error: {e}")
+        print(f"Gemini Chat Error: {e}")
         return {"reply": "I'm having trouble connecting to Gemini. Please check your API key in Settings."}
 
 class UploadSchedulePayload(BaseModel):
@@ -453,15 +495,15 @@ def upload_schedule(payload: UploadSchedulePayload, user_id: str = Depends(get_u
                 text = page.extract_text()
                 if text: schedule_text += text + "\n"
         else:
-            # Step 1: Moondream OCR
-            vision_response = ollama.generate(
-                model='moondream',
+            # Step 1: Gemini OCR
+            vision_response = ai.generate(
+                model='gemini-2.5-flash',
                 prompt="Read this entire schedule/timetable and extract all the text, events, and dates exactly as they appear.",
                 images=[b64_data]
             )
             schedule_text = vision_response['response'].strip()
         
-        # Step 2: Stheno logic
+        # Step 2: Gemini logic
         current_time = datetime.now().isoformat()
         judge_prompt = f"""
         You are a strict, highly intelligent AI Task Planner. The user uploaded a schedule.
@@ -494,8 +536,8 @@ def upload_schedule(payload: UploadSchedulePayload, user_id: str = Depends(get_u
         ]
         """
         
-        judge_response = ollama.chat(
-            model="fluffy/l3-8b-stheno-v3.2:q4_k_m",
+        judge_response = ai.chat(
+            model="gemini-2.5-flash",
             messages=[{"role": "user", "content": judge_prompt}]
         )
         resp_text = judge_response['message']['content'].strip()
@@ -507,12 +549,11 @@ def upload_schedule(payload: UploadSchedulePayload, user_id: str = Depends(get_u
             
         tasks_data = json.loads(resp_text)
         
-        if user_id not in DB['tasks']: DB['tasks'][user_id] = []
         created_tasks = []
-        import uuid
         for td in tasks_data:
+            task_id = str(uuid.uuid4())[:8]
             new_task = {
-                "id": str(uuid.uuid4())[:8],
+                "id": task_id,
                 "title": td.get("title", "Prep Task"),
                 "description": None,
                 "due_date": td.get("due_date", current_time),
@@ -523,10 +564,10 @@ def upload_schedule(payload: UploadSchedulePayload, user_id: str = Depends(get_u
                 "created_at": current_time,
                 "completed_at": None
             }
-            DB['tasks'][user_id].append(new_task)
+            if db:
+                db.collection('users').document(user_id).collection('tasks').document(task_id).set(new_task)
             created_tasks.append(new_task)
             
-        save_db(DB)
         return {"status": "success", "tasks_created": len(created_tasks), "tasks": created_tasks}
     except Exception as e:
         print(f"Schedule Parse Error: {e}")
