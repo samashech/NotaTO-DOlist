@@ -1,8 +1,10 @@
+import os
+from datetime import datetime, timedelta
+
 import firebase_admin
 from firebase_admin import credentials, firestore
 from google import genai
-import os
-from datetime import datetime, timedelta
+
 
 def send_weekly_retrospectives():
     if not firebase_admin._apps:
