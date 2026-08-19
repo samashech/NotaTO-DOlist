@@ -792,6 +792,16 @@ def get_leaderboard(group_id: str):
     leaderboard.sort(key=lambda x: x["score"], reverse=True)
     return leaderboard
 
+
+@app.post("/api/admin/trigger_retro")
+def trigger_retro():
+    try:
+        import email_retrospective
+        email_retrospective.send_weekly_retrospectives()
+        return {"status": "ok", "message": "Check logs for generated emails"}
+    except Exception as e:
+        return {"error": str(e)}
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

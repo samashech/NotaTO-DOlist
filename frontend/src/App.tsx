@@ -135,6 +135,7 @@ function App() {
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [isChatting, setIsChatting] = useState(false);
+  const [voiceModeActive, setVoiceModeActive] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
   // Modal State
@@ -708,6 +709,16 @@ function App() {
     }
   };
 
+  
+  const toggleVoiceMode = () => {
+    if (voiceModeActive) {
+      setVoiceModeActive(false);
+      window.speechSynthesis.cancel();
+    } else {
+      setVoiceModeActive(true);
+    }
+  };
+
   const handleChatSubmit = async (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && chatInput.trim()) {
       const userMessage = chatInput.trim();
@@ -728,7 +739,12 @@ function App() {
         });
         
         const data = await response.json();
-        setChatMessages(prev => [...prev, { role: 'assistant', content: data.reply }]);
+        const reply = data.reply || "I didn't understand.";
+        setChatMessages(prev => [...prev, { role: 'assistant', content: reply }]);
+        if (voiceModeActive) {
+          const u = new SpeechSynthesisUtterance(reply);
+          window.speechSynthesis.speak(u);
+        }
       } catch {
         setChatMessages(prev => [...prev, { role: 'assistant', content: "Network error. Make sure the FastAPI server is running." }]);
       } finally {
@@ -1335,8 +1351,11 @@ function App() {
             <div ref={chatEndRef} />
           </div>
           <div style={{ padding: '24px', borderTop: '1px solid var(--border-color)', display: 'flex', gap: '8px' }}>
-            <button onClick={() => toggleListening(chatInput, setChatInput)} title="Voice Input" style={{ background: isListening ? 'var(--priority-critical)' : 'var(--bg-primary)', border: '1px solid var(--border-color)', color: isListening ? '#fff' : 'var(--text-secondary)', borderRadius: '50%', width: '48px', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', transition: 'all 0.2s ease', animation: isListening ? 'micPulse 1.5s infinite' : 'none', flexShrink: 0 }}>
+            <button onClick={() => toggleListening(chatInput, setChatInput)} title="Dictate" style={{ background: isListening ? 'var(--priority-critical)' : 'var(--bg-primary)', border: '1px solid var(--border-color)', color: isListening ? '#fff' : 'var(--text-secondary)', borderRadius: '50%', width: '48px', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', transition: 'all 0.2s ease', animation: isListening ? 'micPulse 1.5s infinite' : 'none', flexShrink: 0 }}>
               🎤
+            </button>
+            <button onClick={toggleVoiceMode} title="AI Voice Output" style={{ background: voiceModeActive ? 'var(--accent-primary)' : 'var(--bg-primary)', border: '1px solid var(--border-color)', color: voiceModeActive ? '#000' : 'var(--text-secondary)', borderRadius: '50%', width: '48px', height: '48px', display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', transition: 'all 0.2s ease', flexShrink: 0 }}>
+              🔊
             </button>
             <input 
               type="text" 
