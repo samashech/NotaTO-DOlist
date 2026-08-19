@@ -248,7 +248,7 @@ def verify_habit(habit_id: str, payload: VerifyPayload, user_id: str = Depends(g
         import base64
         img_bytes = base64.b64decode(b64_data)
         vision_resp = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.5-flash',
             contents=[
                 types.Part.from_bytes(data=img_bytes, mime_type='image/jpeg'),
                 types.Part.from_text(text="Describe exactly what is happening in this image in detail.")
@@ -264,7 +264,7 @@ def verify_habit(habit_id: str, payload: VerifyPayload, user_id: str = Depends(g
         Did the user complete the habit based on this description? 
         Answer strictly with the word YES or NO, followed by a one-sentence sassy explanation.
         """
-        judge_resp = client.models.generate_content(model='gemini-2.5-flash', contents=judge_prompt)
+        judge_resp = client.models.generate_content(model='gemini-3.5-flash', contents=judge_prompt)
         resp_text = judge_resp.text.strip()
         
         if resp_text.upper().startswith("YES"):
@@ -307,7 +307,7 @@ def onboarding_generate(req: OnboardingRequest):
     """
     try:
         client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
-        resp = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+        resp = client.models.generate_content(model='gemini-3.5-flash', contents=prompt)
         return {"tasks_json": resp.text}
     except Exception as e:
         return {"error": str(e)}
@@ -333,7 +333,7 @@ def analyze_risk(task: Task):
     try:
         client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
         resp = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.5-flash',
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type='application/json',
@@ -380,7 +380,7 @@ def chat_with_ai(req: ChatRequest):
             contents.append(types.Content(role=role, parts=[types.Part.from_text(text=msg.content)]))
         
         resp = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.5-flash',
             contents=contents,
             config=types.GenerateContentConfig(system_instruction=system_prompt)
         )
@@ -441,7 +441,7 @@ def planner_chat(req: PlannerChatRequest):
             contents.append(types.Content(role=role, parts=[types.Part.from_text(text=msg.content)]))
         
         resp = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.5-flash',
             contents=contents,
             config=types.GenerateContentConfig(system_instruction=system_prompt)
         )
@@ -488,7 +488,7 @@ def interrogation_chat(req: PlannerChatRequest):
             contents.append(types.Content(role=role, parts=[types.Part.from_text(text=msg.content)]))
         
         resp = client.models.generate_content(
-            model='gemini-2.5-flash',
+            model='gemini-3.5-flash',
             contents=contents,
             config=types.GenerateContentConfig(system_instruction=system_prompt)
         )
@@ -522,7 +522,7 @@ def upload_schedule(payload: UploadSchedulePayload, user_id: str = Depends(get_u
         else:
             # Step 1: Gemini OCR
             vision_response = ai.generate(
-                model='gemini-2.5-flash',
+                model='gemini-3.5-flash',
                 prompt="Read this entire schedule/timetable and extract all the text, events, and dates exactly as they appear.",
                 images=[b64_data]
             )
@@ -561,7 +561,7 @@ def upload_schedule(payload: UploadSchedulePayload, user_id: str = Depends(get_u
         ]
         """
         
-        judge_resp = client.models.generate_content(model='gemini-2.5-flash', contents=judge_prompt)
+        judge_resp = client.models.generate_content(model='gemini-3.5-flash', contents=judge_prompt)
         resp_text = judge_resp.text.strip()
         
         if "```json" in resp_text:
