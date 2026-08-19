@@ -714,6 +714,84 @@ def admin_accuracy():
     except Exception as e:
         return {"error": str(e)}
 
+
+class UserProfile(BaseModel):
+    displayName: str
+    email: str
+
+@app.post("/api/profile")
+def update_profile(profile: UserProfile, user_id: str = Depends(get_user_id)):
+    if not db: return {"error": "db not initialized"}
+    db.collection('users').document(user_id).set({
+        "displayName": profile.displayName,
+        "email": profile.email,
+        "last_active": datetime.now().isoformat()
+    }, merge=True)
+    return {"status": "ok"}
+
+class CreateGroupRequest(BaseModel):
+    name: str
+
+@app.post("/api/groups")
+def create_group(req: CreateGroupRequest, user_id: str = Depends(get_user_id)):
+    if not db: return {"error": "db not initialized"}
+    group_id = str(uuid.uuid4())[:8]
+    group_data = {
+        "id": group_id,
+        "name": req.name,
+        "members": [user_id],
+        "created_at": datetime.now().isoformat(),
+        "created_by": user_id
+    }
+    db.collection('groups').document(group_id).set(group_data)
+    return group_data
+
+@app.get("/api/groups")
+def get_groups(user_id: str = Depends(get_user_id)):
+    if not db: return []
+    groups = db.collection('groups').where('members', 'array_contains', user_id).stream()
+    return [g.to_dict() for g in groups]
+
+@app.post("/api/groups/{group_id}/join")
+def join_group(group_id: str, user_id: str = Depends(get_user_id)):
+    if not db: return {"error": "db not initialized"}
+    doc_ref = db.collection('groups').document(group_id)
+    doc = doc_ref.get()
+    if not doc.exists: return {"error": "Group not found"}
+    
+    group_data = doc.to_dict()
+    if user_id not in group_data.get("members", []):
+        doc_ref.update({"members": firestore.ArrayUnion([user_id])})
+    return {"status": "ok"}
+
+@app.get("/api/groups/{group_id}/leaderboard")
+def get_leaderboard(group_id: str):
+    if not db: return {"error": "db not initialized"}
+    doc_ref = db.collection('groups').document(group_id)
+    doc = doc_ref.get()
+    if not doc.exists: return {"error": "Group not found"}
+    
+    members = doc.to_dict().get("members", [])
+    leaderboard = []
+    
+    for member_id in members:
+        # Get user profile
+        user_doc = db.collection('users').document(member_id).get()
+        display_name = user_doc.to_dict().get("displayName", "Unknown User") if user_doc.exists else "Unknown User"
+        
+        # Count completed tasks
+        tasks = db.collection('users').document(member_id).collection('tasks').where('status', '==', 'completed').stream()
+        completed_count = len(list(tasks))
+        
+        leaderboard.append({
+            "user_id": member_id,
+            "displayName": display_name,
+            "score": completed_count * 10  # 10 points per completed task
+        })
+        
+    leaderboard.sort(key=lambda x: x["score"], reverse=True)
+    return leaderboard
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

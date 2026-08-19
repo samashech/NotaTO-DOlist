@@ -1,4 +1,5 @@
 import { AdminDashboard } from './AdminDashboard';
+import { GroupsLeaderboard } from './GroupsLeaderboard';
 import { useState, useEffect, useRef } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
 import { auth, googleProvider, githubProvider, signInWithPopup, signOut, onAuthStateChanged } from './firebase';
@@ -918,6 +919,10 @@ function App() {
     if (loading && tasks.length === 0) return <p style={{ color: 'var(--text-secondary)' }}>Loading tasks from backend...</p>;
 
     
+    
+    if (activeTab === 'groups' && user) {
+      return <GroupsLeaderboard user={user} />;
+    }
     if (activeTab === 'admin') {
       return <AdminDashboard />;
     }
@@ -1425,6 +1430,16 @@ function App() {
             {!isSidebarCollapsed && <span className="sidebar-text" style={{ marginLeft: '12px' }}>Settings</span>}
           </button>
 
+
+          <button 
+            onClick={() => setActiveTab('groups')}
+            className={`sidebar-tab ${activeTab === 'groups' ? 'active' : ''} hover-lift`}
+            title="Accountability Groups"
+            style={{ display: 'flex', alignItems: 'center', width: '100%', marginTop: '8px', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', padding: '12px', justifyContent: isSidebarCollapsed ? 'center' : 'flex-start' }}
+          >
+            <span className="sidebar-icon" style={{ fontSize: '1.2rem', display: 'inline-block', width: '24px', textAlign: 'center' }}>🏆</span>
+            {!isSidebarCollapsed && <span className="sidebar-text" style={{ marginLeft: '12px' }}>Groups</span>}
+          </button>
           <button 
             onClick={() => setActiveTab('admin')}
             className={`sidebar-tab ${activeTab === 'admin' ? 'active' : ''} hover-lift`}
