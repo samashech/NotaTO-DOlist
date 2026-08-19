@@ -3,7 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
-import gemini_shim as ai
+try:
+    import gemini_shim as ai
+except ImportError:
+    from backend import gemini_shim as ai
 import json
 import os
 
