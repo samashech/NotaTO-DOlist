@@ -1,3 +1,6 @@
+# Trackly AI (Deadline Guardian AI)
+
+[![CI](https://github.com/samashech/samashechcal/actions/workflows/ci.yml/badge.svg)](https://github.com/samashech/samashechcal/actions)
 # Trackly 🚀
 
 Trackly (formerly ActionMate AI) is a ruthless, autonomous productivity application designed for extreme procrastinators. 
