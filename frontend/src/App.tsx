@@ -1,3 +1,4 @@
+import { AdminDashboard } from './AdminDashboard';
 import { useState, useEffect, useRef } from 'react';
 import type { FormEvent, KeyboardEvent } from 'react';
 import { auth, googleProvider, githubProvider, signInWithPopup, signOut, onAuthStateChanged } from './firebase';
@@ -916,6 +917,11 @@ function App() {
   const renderContent = () => {
     if (loading && tasks.length === 0) return <p style={{ color: 'var(--text-secondary)' }}>Loading tasks from backend...</p>;
 
+    
+    if (activeTab === 'admin') {
+      return <AdminDashboard />;
+    }
+
     if (activeTab === 'settings') {
       return (
         <div className="glass-panel animate-fade-in" style={{ padding: '32px' }}>
@@ -1417,6 +1423,16 @@ function App() {
           >
             <span className="sidebar-icon" style={{ fontSize: '1.2rem', display: 'inline-block', width: '24px', textAlign: 'center' }}>⚙️</span>
             {!isSidebarCollapsed && <span className="sidebar-text" style={{ marginLeft: '12px' }}>Settings</span>}
+          </button>
+
+          <button 
+            onClick={() => setActiveTab('admin')}
+            className={`sidebar-tab ${activeTab === 'admin' ? 'active' : ''} hover-lift`}
+            title="Admin Dashboard"
+            style={{ display: 'flex', alignItems: 'center', width: '100%', marginTop: '8px', background: 'var(--bg-primary)', border: '1px solid var(--border-color)', padding: '12px', justifyContent: isSidebarCollapsed ? 'center' : 'flex-start' }}
+          >
+            <span className="sidebar-icon" style={{ fontSize: '1.2rem', display: 'inline-block', width: '24px', textAlign: 'center' }}>🔒</span>
+            {!isSidebarCollapsed && <span className="sidebar-text" style={{ marginLeft: '12px' }}>Admin</span>}
           </button>
         </div>
       </aside>

@@ -235,6 +235,16 @@ def update_task_status(task_id: str, payload: dict, user_id: str = Depends(get_u
     
     doc_ref.update(updates)
     t.update(updates)
+    
+    # Phase 3: AI Evaluation Layer - Update Judge Verdicts
+    if payload.get("status") in ["completed", "failed"] and old_status != payload.get("status"):
+        try:
+            preds = db.collection('risk_predictions').where('task_id', '==', task_id).stream()
+            for p in preds:
+                p.reference.update({"actual_outcome": payload.get("status")})
+        except Exception as e:
+            print(f"Failed to update risk prediction outcome: {e}")
+            
     return t
 
 @app.delete("/api/tasks/{task_id}")
@@ -396,6 +406,7 @@ def onboarding_generate(req: OnboardingRequest, user_id: str = Header(default="a
 
 @app.post("/api/analyze_risk")
 def analyze_risk(task: Task, user_id: str = Header(default="anonymous")):
+    PROMPT_VERSION = "v1.0"
     prompt = f"""
     You are an AI Productivity Coach. Analyze the following task and predict the risk of missing the deadline.
     
@@ -415,7 +426,26 @@ def analyze_risk(task: Task, user_id: str = Header(default="anonymous")):
         "breakdown": ["Open your tools", "Begin step one", "Maintain focus"]
     }
     
-    return call_gemini_structured(prompt, RiskResponse, fallback, "analyze_risk", user_id)
+    resp = call_gemini_structured(prompt, RiskResponse, fallback, "analyze_risk", user_id)
+    
+    # Log prediction to Firestore
+    if db and user_id != "anonymous":
+        try:
+            db.collection('risk_predictions').add({
+                "user_id": user_id,
+                "task_id": task.id,
+                "task_title": task.title,
+                "prompt_version": PROMPT_VERSION,
+                "predicted_risk_score": resp["risk_score"],
+                "recommendation": resp["recommendation"],
+                "timestamp": datetime.now().isoformat(),
+                "actual_outcome": None # Will be updated when task is completed or failed
+            })
+        except Exception as e:
+            print(f"Failed to log risk prediction: {e}")
+            
+    return resp
+
 
 
 class ChatMessage(BaseModel):
@@ -648,6 +678,41 @@ def upload_schedule(payload: UploadSchedulePayload, user_id: str = Depends(get_u
         print(f"Schedule Parse Error: {e}")
         return {"error": str(e)}
 
+
+
+@app.get("/api/admin/accuracy")
+def admin_accuracy():
+    if not db: return {"error": "db not initialized"}
+    try:
+        preds = db.collection('risk_predictions').stream()
+        total_predictions = 0
+        completed = 0
+        failed = 0
+        avg_risk_score = 0
+        
+        for p in preds:
+            data = p.to_dict()
+            total_predictions += 1
+            avg_risk_score += data.get("predicted_risk_score", 0)
+            if data.get("actual_outcome") == "completed":
+                completed += 1
+            elif data.get("actual_outcome") == "failed":
+                failed += 1
+                
+        if total_predictions > 0:
+            avg_risk_score /= total_predictions
+            
+        return {
+            "total_predictions": total_predictions,
+            "average_risk_score": avg_risk_score,
+            "outcomes": {
+                "completed": completed,
+                "failed": failed,
+                "pending": total_predictions - (completed + failed)
+            }
+        }
+    except Exception as e:
+        return {"error": str(e)}
 
 if __name__ == "__main__":
     import uvicorn
