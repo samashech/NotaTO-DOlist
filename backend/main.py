@@ -3,10 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Optional
 from datetime import datetime
-try:
-    import gemini_shim as ai
-except ImportError:
-    from backend import gemini_shim as ai
+import os
+from google import genai
+from google.genai import types
+import traceback
 import json
 import os
 
@@ -244,9 +244,17 @@ def verify_habit(habit_id: str, payload: VerifyPayload, user_id: str = Depends(g
 
     try:
         # Step 1: The "Eyes" (Gemini describes the image)
-        vision_response = ai.generate(model='gemini-2.5-flash', prompt="Describe exactly what is happening in this image in detail.", images=[b64_data]
+        client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
+        import base64
+        img_bytes = base64.b64decode(b64_data)
+        vision_resp = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=[
+                types.Part.from_bytes(data=img_bytes, mime_type='image/jpeg'),
+                types.Part.from_text(text="Describe exactly what is happening in this image in detail.")
+            ]
         )
-        image_description = vision_response['response'].strip()
+        image_description = vision_resp.text.strip()
         
         # Step 2: The "Judge" (Gemini evaluates the description)
         judge_prompt = f"""
@@ -256,11 +264,8 @@ def verify_habit(habit_id: str, payload: VerifyPayload, user_id: str = Depends(g
         Did the user complete the habit based on this description? 
         Answer strictly with the word YES or NO, followed by a one-sentence sassy explanation.
         """
-        judge_response = ai.chat(
-            model="gemini-2.5-flash",
-            messages=[{"role": "user", "content": judge_prompt}]
-        )
-        resp_text = judge_response['message']['content'].strip()
+        judge_resp = client.models.generate_content(model='gemini-2.5-flash', contents=judge_prompt)
+        resp_text = judge_resp.text.strip()
         
         if resp_text.upper().startswith("YES"):
             result = {"verified": True, "sassy_reason": resp_text}
@@ -301,11 +306,9 @@ def onboarding_generate(req: OnboardingRequest):
     ]
     """
     try:
-        response = ai.chat(
-            model="gemini-2.5-flash",
-            messages=[{"role": "user", "content": prompt}]
-        )
-        return {"tasks_json": response['message']['content']}
+        client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
+        resp = client.models.generate_content(model='gemini-2.5-flash', contents=prompt)
+        return {"tasks_json": resp.text}
     except Exception as e:
         return {"error": str(e)}
 
@@ -328,25 +331,23 @@ def analyze_risk(task: Task):
     """
     
     try:
-        response = ai.chat(model='gemini-2.5-flash', messages=[
-            {
-                'role': 'system',
-                'content': 'You are a precise JSON-generating assistant. Only output valid JSON.'
-            },
-            {
-                'role': 'user',
-                'content': prompt
-            }
-        ], format='json')
-        
-        result_content = response['message']['content']
-        return json.loads(result_content)
+        client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
+        resp = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type='application/json',
+                system_instruction='You are a precise JSON-generating assistant. Only output valid JSON.'
+            )
+        )
+        text = resp.text
+        if text.startswith("```json"): text = text.replace("```json", "").replace("```", "").strip()
+        return json.loads(text)
     except Exception as e:
-        # Fallback if Gemini isn't running or fails
         print(f"Gemini Error: {e}")
         return {
             "risk_score": 50,
-            "recommendation": "Unable to connect to Google Gemini API. Please check your API key in Settings.",
+            "recommendation": f"Gemini API Error: {str(e)}",
             "breakdown": ["Check API Key", "Check internet connection", "Retry task"]
         }
 
@@ -371,16 +372,23 @@ def chat_with_ai(req: ChatRequest):
     """
     
     # Prepend system prompt to the messages
-    gemini_messages = [{'role': 'system', 'content': system_prompt}]
-    for msg in req.messages:
-        gemini_messages.append({'role': msg.role, 'content': msg.content})
-        
     try:
-        response = ai.chat(model='gemini-2.5-flash', messages=gemini_messages)
-        return {"reply": response['message']['content']}
+        client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
+        contents = []
+        for msg in req.messages:
+            role = "user" if msg.role == "user" else "model"
+            contents.append(types.Content(role=role, parts=[types.Part.from_text(text=msg.content)]))
+        
+        resp = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=contents,
+            config=types.GenerateContentConfig(system_instruction=system_prompt)
+        )
+        return {"reply": resp.text}
     except Exception as e:
-        print(f"Gemini Chat Error: {e}")
-        return {"reply": "I'm having trouble connecting to Gemini. Please check your API key in Settings."}
+        err_msg = str(e)
+        if not os.environ.get("GEMINI_API_KEY"): err_msg = "API Key is empty!"
+        return {"reply": f"Gemini Error: {err_msg}"}
 
 class PlannerChatRequest(BaseModel):
     messages: List[ChatMessage]
@@ -425,16 +433,23 @@ def planner_chat(req: PlannerChatRequest):
     Do not add ANY conversational text before or after the JSON block. Output ONLY the JSON block.
     """
     
-    gemini_messages = [{'role': 'system', 'content': system_prompt}]
-    for msg in req.messages:
-        gemini_messages.append({'role': msg.role, 'content': msg.content})
-        
     try:
-        response = ai.chat(model='gemini-2.5-flash', messages=gemini_messages)
-        return {"reply": response['message']['content']}
+        client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
+        contents = []
+        for msg in req.messages:
+            role = "user" if msg.role == "user" else "model"
+            contents.append(types.Content(role=role, parts=[types.Part.from_text(text=msg.content)]))
+        
+        resp = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=contents,
+            config=types.GenerateContentConfig(system_instruction=system_prompt)
+        )
+        return {"reply": resp.text}
     except Exception as e:
-        print(f"Gemini Chat Error: {e}")
-        return {"reply": "I'm having trouble connecting to Gemini. Please check your API key in Settings."}
+        err_msg = str(e)
+        if not os.environ.get("GEMINI_API_KEY"): err_msg = "API Key is empty!"
+        return {"reply": f"Gemini Error: {err_msg}"}
 
 @app.post("/api/interrogation_chat")
 def interrogation_chat(req: PlannerChatRequest):
@@ -465,16 +480,23 @@ def interrogation_chat(req: PlannerChatRequest):
     Do not add ANY conversational text before or after the JSON block. Output ONLY the JSON block.
     """
     
-    gemini_messages = [{'role': 'system', 'content': system_prompt}]
-    for msg in req.messages:
-        gemini_messages.append({'role': msg.role, 'content': msg.content})
-        
     try:
-        response = ai.chat(model='gemini-2.5-flash', messages=gemini_messages)
-        return {"reply": response['message']['content']}
+        client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY", ""))
+        contents = []
+        for msg in req.messages:
+            role = "user" if msg.role == "user" else "model"
+            contents.append(types.Content(role=role, parts=[types.Part.from_text(text=msg.content)]))
+        
+        resp = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=contents,
+            config=types.GenerateContentConfig(system_instruction=system_prompt)
+        )
+        return {"reply": resp.text}
     except Exception as e:
-        print(f"Gemini Chat Error: {e}")
-        return {"reply": "I'm having trouble connecting to Gemini. Please check your API key in Settings."}
+        err_msg = str(e)
+        if not os.environ.get("GEMINI_API_KEY"): err_msg = "API Key is empty!"
+        return {"reply": f"Gemini Error: {err_msg}"}
 
 class UploadSchedulePayload(BaseModel):
     image_base64: str
@@ -539,11 +561,8 @@ def upload_schedule(payload: UploadSchedulePayload, user_id: str = Depends(get_u
         ]
         """
         
-        judge_response = ai.chat(
-            model="gemini-2.5-flash",
-            messages=[{"role": "user", "content": judge_prompt}]
-        )
-        resp_text = judge_response['message']['content'].strip()
+        judge_resp = client.models.generate_content(model='gemini-2.5-flash', contents=judge_prompt)
+        resp_text = judge_resp.text.strip()
         
         if "```json" in resp_text:
             resp_text = resp_text.split("```json")[1].split("```")[0].strip()
