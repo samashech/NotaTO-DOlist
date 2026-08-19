@@ -211,8 +211,8 @@ function App() {
           const startX = modalRect.left - 10;
           const startY = modalRect.top + 30;
           
-          let endX = rect.left + rect.width / 2;
-          let endY = rect.top + rect.height / 2;
+          const endX = rect.left + rect.width / 2;
+          const endY = rect.top + rect.height / 2;
           
           svgPath.setAttribute('d', `M ${startX} ${startY} Q ${startX} ${endY}, ${endX} ${endY}`);
           svgArrow.setAttribute('cx', endX.toString());
@@ -458,7 +458,7 @@ function App() {
   async function createHabitAPI(title: string) {
     try {
       const match = title.toLowerCase().match(/(?:stop using|quit|no) ([a-z0-9-]+)(?:\.com|\.org|\.net)?/i);
-      let tracked_domains: string[] = [];
+      const tracked_domains: string[] = [];
       if (match) {
         let domain = match[1];
         if (!domain.includes('.')) domain += '.com';

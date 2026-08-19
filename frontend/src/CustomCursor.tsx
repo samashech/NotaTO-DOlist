@@ -11,7 +11,7 @@ export const CustomCursor = ({ type }: { type: CursorStyle }) => {
   
   // For Glitch & Liquid
   const [velocity, setVelocity] = useState({ x: 0, y: 0 });
-  const lastPos = useRef({ x: -100, y: -100, time: Date.now() });
+  const lastPos = useRef({ x: -100, y: -100, time: 0 });
 
   useEffect(() => {
     const updatePosition = (e: MouseEvent) => {

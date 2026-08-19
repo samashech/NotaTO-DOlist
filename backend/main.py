@@ -1,18 +1,15 @@
-from fastapi import FastAPI, Depends, Header
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Optional
-from datetime import datetime
+import hashlib
+import json
+import logging
 import os
+import time
+import uuid
+from datetime import datetime
+
+from fastapi import Depends, FastAPI, Header
+from fastapi.middleware.cors import CORSMiddleware
 from google import genai
 from google.genai import types
-import traceback
-import json
-
-import time
-import logging
-import uuid
-import hashlib
 from pydantic import BaseModel, ValidationError
 
 # Setup structured logging
@@ -63,7 +60,7 @@ def call_gemini_structured(prompt: str, schema_model, default_fallback: dict, en
             validated = schema_model.parse_raw(text)
             log_ai_call(endpoint_name, user_id, latency, True, tokens=tokens)
             return validated.dict()
-        except ValidationError as ve:
+        except ValidationError:
             # Retry once
             retry_prompt = f"Your previous output was invalid. STRICTLY output valid JSON matching this schema:\n{schema_schema}\n\nOriginal Request:\n{prompt}"
             retry_start = time.time()
@@ -96,12 +93,12 @@ class OnboardingTask(BaseModel):
     priority: str
 
 class OnboardingResponse(BaseModel):
-    tasks: List[OnboardingTask]
+    tasks: list[OnboardingTask]
 
 class RiskResponse(BaseModel):
     risk_score: int
     recommendation: str
-    breakdown: List[str]
+    breakdown: list[str]
 
 import sentry_sdk
 
@@ -124,27 +121,26 @@ app.add_middleware(
 class Task(BaseModel):
     id: str
     title: str
-    description: Optional[str] = None
+    description: str | None = None
     due_date: str
     estimated_hours: float
     status: str = "pending"
     priority: str = "medium"
-    blocked_sites: List[str] = []
-    created_at: Optional[str] = None
-    completed_at: Optional[str] = None
+    blocked_sites: list[str] = []
+    created_at: str | None = None
+    completed_at: str | None = None
 
 class Habit(BaseModel):
     id: str
     title: str
     streak: int = 0
     completed_today: bool = False
-    tracked_domains: List[str] = []
+    tracked_domains: list[str] = []
     requires_proof: bool = False
 
 
 import firebase_admin
 from firebase_admin import credentials, firestore
-import uuid
 
 # Initialize Firebase Admin
 if not firebase_admin._apps:
@@ -167,7 +163,7 @@ except Exception as e:
 
 ACTIVE_USER_ID = "default"
 
-def get_user_id(x_user_id: Optional[str] = Header(None)):
+def get_user_id(x_user_id: str | None = Header(None)):
     global ACTIVE_USER_ID
     if x_user_id:
         ACTIVE_USER_ID = x_user_id
@@ -194,7 +190,7 @@ def get_tasks(user_id: str = Depends(get_user_id)):
                 if (now - completed_date).days > 7:
                     tasks_ref.document(doc.id).delete()
                     continue
-            except:
+            except Exception:
                 pass
         valid_tasks.append(t)
     return valid_tasks
@@ -380,7 +376,7 @@ def verify_habit(habit_id: str, payload: VerifyPayload, user_id: str = Depends(g
                 doc_ref.update({"completed_today": True, "streak": target_habit["streak"]})
         return result
     except Exception as e:
-        return {"verified": False, "sassy_reason": f"AI Verification failed: {str(e)}"}
+        return {"verified": False, "sassy_reason": f"AI Verification failed: {e!s}"}
 
 class OnboardingRequest(BaseModel):
     user_mission: str
@@ -427,7 +423,7 @@ class ChatMessage(BaseModel):
     content: str
 
 class ChatRequest(BaseModel):
-    messages: List[ChatMessage]
+    messages: list[ChatMessage]
     tasks_context: str
 
 @app.post("/api/chat")
@@ -462,7 +458,7 @@ def chat_with_ai(req: ChatRequest):
         return {"reply": f"Gemini Error: {err_msg}"}
 
 class PlannerChatRequest(BaseModel):
-    messages: List[ChatMessage]
+    messages: list[ChatMessage]
 
 @app.post("/api/planner_chat")
 def planner_chat(req: PlannerChatRequest):
@@ -620,10 +616,10 @@ def upload_schedule(payload: UploadSchedulePayload, user_id: str = Depends(get_u
             estimated_hours: float
             priority: str
             due_date: str
-            blocked_sites: List[str]
+            blocked_sites: list[str]
             
         class ScheduleResponse(BaseModel):
-            tasks: List[PrepTask]
+            tasks: list[PrepTask]
         
         fallback = {"tasks": []}
         resp = call_gemini_structured(prompt, ScheduleResponse, fallback, "upload_schedule", user_id)

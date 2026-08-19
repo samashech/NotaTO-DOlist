@@ -1,0 +1,7 @@
+[lint]
+ignore = [
+    "BLE001", # Do not catch blind exception: Exception
+    "S110",   # try-except-pass
+    "DTZ005", # datetime.now() without tz
+    "E722"    # bare except
+]
