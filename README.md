@@ -1,15 +1,15 @@
-# Trackly AI (Deadline Guardian AI) 🚀
+# Trackly AI (Deadline Guardian AI)
 
-[![CI](https://github.com/samashech/samashechcal/actions/workflows/ci.yml/badge.svg)](https://github.com/samashech/samashechcal/actions)
+Live URL: https://trackly-eosin.vercel.app/
 
 Trackly AI is a ruthless, autonomous productivity application designed for extreme procrastinators. 
 
 It acts as an aggressive accountability partner powered entirely by **Google's Gemini 3.5 Flash** model, utilizing its lightning-fast multimodal reasoning capabilities to act as a task planner, an image-verifying habit judge, and a ruthless accountability coach.
 
-## 🚨 The Problem
+## The Problem
 Traditional to-do lists are passive. They let you write down tasks and then happily sit back while you completely ignore them. When you miss a deadline, nothing happens. The system enables your procrastination instead of fighting it.
 
-## 💡 The Solution
+## The Solution
 Trackly takes a hostile approach to productivity. When you set a task, you assign a deadline and a list of distraction websites (like `youtube.com`). If you miss that deadline, the system goes into **Nuclear Lockdown**:
 1. Your dashboard is hijacked.
 2. The **AI Coach** interrogates you on why you failed.
@@ -18,7 +18,7 @@ Trackly takes a hostile approach to productivity. When you set a task, you assig
 
 ---
 
-## ✨ Features (The 5 Phases of Expansion)
+## Features (The 5 Phases of Expansion)
 
 ### Phase 1: Core AI & Brutalist UI
 - **Brutalist Glassmorphism UI:** Built with raw CSS variables and native React (no Tailwind/MUI).
@@ -36,18 +36,17 @@ Trackly takes a hostile approach to productivity. When you set a task, you assig
 
 ### Phase 4: High-Weight Social Features
 - **Accountability Squads:** Create and join accountability groups.
-- **Dynamic Leaderboards:** Compete against friends. Earn 10 points for every task completed successfully!
+- **Dynamic Leaderboards:** Compete against friends. Earn 10 points for every task completed successfully.
 - **AI Voice Mode:** The AI Coach literally speaks back to you using the Web Speech API.
 - **Progressive Web App (PWA):** Fully installable mobile companion app.
 - **Weekly Retrospective Engine:** A cron-triggered AI pipeline that summarizes your weekly completed tasks into an encouraging, aggressive email.
 
 ---
 
-## ⚙️ System Architecture
+## System Architecture
 
 ```mermaid
 graph TD
-    %% Entities
     User((User))
     ChromeExt[Chrome Enforcer Ext]
     Frontend[React + Vite PWA]
@@ -56,20 +55,16 @@ graph TD
     Firestore[(Firebase Firestore)]
     Auth[(Firebase Auth)]
 
-    %% User interactions
     User -->|Views UI / Speaks| Frontend
     User -->|Browses Web| ChromeExt
     
-    %% Frontend flows
     Frontend -->|Auth| Auth
     Frontend <-->|REST API JSON| Vercel
     ChromeExt <-->|Polls Task Status| Vercel
 
-    %% Backend flows
     Vercel <-->|google-genai SDK| Gemini
     Vercel <-->|firebase-admin| Firestore
     
-    %% Subsystems
     subgraph Cloud Infrastructure
         Vercel
         Firestore
@@ -81,13 +76,13 @@ graph TD
     end
 ```
 
-## 🛠️ Tech Stack
+## Tech Stack
 * **Backend:** Python, FastAPI, Pydantic, Sentry, `google-genai`, Vercel Serverless.
 * **Frontend:** React, Vite, TypeScript, Firebase Client SDK, Web Speech API.
 * **Database:** Firebase Firestore, Firebase Auth.
 * **CI/CD:** GitHub Actions (Ruff, Pytest, Vitest, ESLint, TypeScript).
 
-## 🚀 Local Development Setup
+## Local Development Setup
 
 ### 1. Clone & Install
 ```bash
@@ -122,7 +117,7 @@ cd frontend
 npm run dev
 ```
 
-## 📚 Case Study: Engineering Resilient AI
+## Case Study: Engineering Resilient AI
 Building autonomous AI agents requires defensive programming. LLMs are non-deterministic, meaning they will eventually output malformed data, no matter how good the prompt is. 
 
 **How we solved AI hallucinations in Trackly:**
