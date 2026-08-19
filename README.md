@@ -1,4 +1,4 @@
-# Trackly AI (Deadline Guardian AI)
+# Trackly AI
 
 Live URL: https://trackly-eosin.vercel.app/
 
