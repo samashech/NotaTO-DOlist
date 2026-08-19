@@ -8,7 +8,7 @@ vi.mock('./firebase', () => ({
 }));
 
 vi.mock('firebase/auth', () => ({
-  onAuthStateChanged: vi.fn((auth, cb) => {
+  onAuthStateChanged: vi.fn((_auth, cb) => {
     cb(null);
     return () => {};
   }),
@@ -16,7 +16,6 @@ vi.mock('firebase/auth', () => ({
   GoogleAuthProvider: vi.fn()
 }));
 
-// Provide a simple matchMedia mock
 Object.defineProperty(window, 'matchMedia', {
   writable: true,
   value: vi.fn().mockImplementation(query => ({
@@ -33,7 +32,7 @@ Object.defineProperty(window, 'matchMedia', {
 
 describe('App Component', () => {
   it('renders without crashing', () => {
-    // Basic test to avoid rabbit holes
-    expect(true).toBe(true);
+    render(<App />);
+    expect(screen.getByText(/Deadline Guardian AI/i)).toBeInTheDocument();
   });
 });
